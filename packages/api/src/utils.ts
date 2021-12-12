@@ -8,6 +8,7 @@ import { Package } from '@verdaccio/types';
  */
 
 export function isPublishablePackage(pkg: Package): boolean {
+  // TODO: we can do better, no need get keys
   const keys: string[] = Object.keys(pkg);
 
   return _.includes(keys, 'versions');

@@ -11,7 +11,10 @@ import { logger } from '@verdaccio/logger';
 import { ProxyStorage } from '@verdaccio/proxy';
 import { IProxy, ProxyList } from '@verdaccio/proxy';
 import { ReadTarball } from '@verdaccio/streams';
-import { convertDistRemoteToLocalTarballUrls } from '@verdaccio/tarball';
+import {
+  convertDistRemoteToLocalTarballUrls,
+  convertDistVersionToLocalTarballsUrl,
+} from '@verdaccio/tarball';
 import {
   Callback,
   CallbackAction,
@@ -29,8 +32,9 @@ import {
   Version,
   Versions,
 } from '@verdaccio/types';
-import { getVersion, normalizeDistTags } from '@verdaccio/utils';
+import { getVersion, hasDiffOneKey, isObject, normalizeDistTags } from '@verdaccio/utils';
 
+import { isPublishablePackage } from '.';
 import { LocalStorage } from './local-storage';
 import { SearchInstance, SearchManager } from './search';
 import {
@@ -346,7 +350,85 @@ class Storage {
     }
   }
 
-  public async getPackageNext(options: IGetPackageOptionsNext): Promise<Package | Version> {
+  public async getPackageByVersion(options: IGetPackageOptionsNext): Promise<Version> {
+    const queryVersion = options.version as string;
+    if (_.isNil(queryVersion)) {
+      throw errorUtils.getNotFound(`${API_ERROR.VERSION_NOT_EXIST}: ${queryVersion}`);
+    }
+
+    // we have version, so we need to return specific version
+    const [convertedManifest] = await this.getPackageNext(options);
+
+    const version: Version | undefined = getVersion(convertedManifest.versions, queryVersion);
+
+    debug('query by latest version %o and result %o', queryVersion, version);
+    if (typeof version !== 'undefined') {
+      debug('latest version found %o', version);
+      return convertDistVersionToLocalTarballsUrl(
+        convertedManifest.name,
+        version,
+        options.requestOptions,
+        this.config.url_prefix
+      );
+    }
+
+    // the version could be a dist-tag eg: beta, alpha, so we find the matched version
+    // on disg-tag list
+    if (_.isNil(convertedManifest[DIST_TAGS]) === false) {
+      if (_.isNil(convertedManifest[DIST_TAGS][queryVersion]) === false) {
+        // the version found as a distag
+        const matchedDisTagVersion: string = convertedManifest[DIST_TAGS][queryVersion];
+        debug('dist-tag version found %o', matchedDisTagVersion);
+        const disTagVersion: Version | undefined = getVersion(
+          convertedManifest.versions,
+          matchedDisTagVersion
+        );
+        if (typeof disTagVersion !== 'undefined') {
+          debug('dist-tag found %o', disTagVersion);
+          return convertDistVersionToLocalTarballsUrl(
+            convertedManifest.name,
+            disTagVersion,
+            options.requestOptions,
+            this.config.url_prefix
+          );
+        }
+      }
+    } else {
+      debug('dist tag not detected');
+    }
+
+    // we didn't find the version, not found error
+    debug('package version not found %o', queryVersion);
+    throw errorUtils.getNotFound(`${API_ERROR.VERSION_NOT_EXIST}: ${queryVersion}`);
+  }
+
+  public async getPackageManifest(options: IGetPackageOptionsNext): Promise<Package> {
+    // convert dist remotes to local bars
+    const [manifest] = await this.getPackageNext(options);
+    const convertedManifest = convertDistRemoteToLocalTarballUrls(
+      manifest,
+      options.requestOptions,
+      this.config.url_prefix
+    );
+
+    return convertedManifest;
+  }
+
+  /**
+   * Return a manifest or version based on the options.
+   * @param options {Object}
+   * @returns A package manifest or specific version
+   */
+  public async getPackageByOptions(options: IGetPackageOptionsNext): Promise<Package | Version> {
+    // if no version we return the whole manifest
+    if (_.isNil(options.version) === false) {
+      return this.getPackageByVersion(options);
+    } else {
+      return this.getPackageManifest(options);
+    }
+  }
+
+  public async getPackageNext(options: IGetPackageOptionsNext): Promise<[Package, any[]]> {
     const { name } = options;
     debug('get package for %o', name);
     try {
@@ -363,59 +445,11 @@ class Storage {
       // time to sync with uplinks if we have any
       debug('sync uplinks for %o', name);
       // @ts-expect-error
-      const [manifest, errors] = await this._syncUplinksMetadataNext(name, data, {
+      return this._syncUplinksMetadataNext(name, data, {
         req: options.req,
         uplinksLook: options.uplinksLook,
         keepUpLinkData: options.keepUpLinkData,
       });
-      debug('no. sync uplinks errors %o', errors?.length);
-
-      // TODO: we could improve performance here, if a specific version is requested
-      // we just convert that version and return it otherwise we convert
-      // the whole manifest, bonus points for contribution :)
-      // convert dist remotes to local bars
-      const convertedManifest = convertDistRemoteToLocalTarballUrls(
-        manifest,
-        options.requestOptions,
-        this.config.url_prefix
-      );
-      // if no version we return the whole manifest
-      if (_.isNil(options.version)) {
-        return convertedManifest;
-      }
-
-      // we have version, so we need to return specific version
-      const queryVersion = options.version as string;
-      const version: Version | undefined = getVersion(convertedManifest.versions, options.version);
-      debug('query by latest version %o and result %o', options.version, version);
-      if (typeof version !== 'undefined') {
-        debug('latest version found %o', version);
-        return version;
-      }
-
-      // the version could be a dist-tag eg: beta, alpha, so we find the matched version
-      // on disg-tag list
-      if (_.isNil(convertedManifest[DIST_TAGS]) === false) {
-        if (_.isNil(convertedManifest[DIST_TAGS][queryVersion]) === false) {
-          // the version found as a distag
-          const matchedDisTagVersion: string = convertedManifest[DIST_TAGS][queryVersion];
-          debug('dist-tag version found %o', matchedDisTagVersion);
-          const disTagVersion: Version | undefined = getVersion(
-            convertedManifest.versions,
-            matchedDisTagVersion
-          );
-          if (typeof disTagVersion !== 'undefined') {
-            debug('dist-tag found %o', disTagVersion);
-            return disTagVersion;
-          }
-        }
-      } else {
-        debug('dist tag not detected');
-      }
-
-      // we didn't find the version, not found error
-      debug('package version not found %o', queryVersion);
-      throw errorUtils.getNotFound(`${API_ERROR.VERSION_NOT_EXIST}: ${queryVersion}`);
     } catch (err: any) {
       this.logger.error(
         { name, err: err.message },
