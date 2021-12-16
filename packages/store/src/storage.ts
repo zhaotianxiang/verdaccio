@@ -5,8 +5,16 @@ import _ from 'lodash';
 import semver from 'semver';
 
 import { hasProxyTo } from '@verdaccio/config';
-import { API_ERROR, DIST_TAGS, HTTP_STATUS, errorUtils } from '@verdaccio/core';
-import { pkgUtils, validatioUtils } from '@verdaccio/core';
+import {
+  API_ERROR,
+  API_MESSAGE,
+  DIST_TAGS,
+  HTTP_STATUS,
+  constants,
+  errorUtils,
+  pkgUtils,
+  validatioUtils,
+} from '@verdaccio/core';
 import { logger } from '@verdaccio/logger';
 import { ProxyStorage } from '@verdaccio/proxy';
 import { IProxy, ProxyList } from '@verdaccio/proxy';
@@ -32,11 +40,11 @@ import {
   Version,
   Versions,
 } from '@verdaccio/types';
-import { getVersion, hasDiffOneKey, isObject, normalizeDistTags } from '@verdaccio/utils';
+import { getVersion, isObject, normalizeDistTags } from '@verdaccio/utils';
 
-import { isPublishablePackage } from '.';
 import { LocalStorage } from './local-storage';
 import { SearchInstance, SearchManager } from './search';
+import { isPublishablePackage, validateInputs } from './star-utils';
 import {
   checkPackageLocal,
   checkPackageRemote,
@@ -46,6 +54,7 @@ import {
   publishPackage,
 } from './storage-utils';
 import { IGetPackageOptions, IGetPackageOptionsNext, IPluginFilters, ISyncUplinks } from './type';
+import { StarBody, Users } from './type';
 import { setupUpLinks, updateVersionsHiddenUpLink } from './uplink-util';
 
 if (semver.lte(process.version, 'v15.0.0')) {
@@ -349,6 +358,51 @@ class Storage {
       }
     }
   }
+
+  // public async starPackage(body: StarBody, options: IGetPackageOptionsNext): Promise<void> {
+  //   debug('star package');
+  //   const manifest = await this.getPackageNext(options);
+  //   const newStarUser = body[constants.USERS];
+  //   const remoteUsername: string = options.remoteUser.name as string;
+  //   const localStarUsers = manifest[constants.USERS];
+  //   // Check is star or unstar
+  //   const isStar = Object.keys(newStarUser).includes(remoteUsername);
+  //   debug('is start? %o', isStar);
+  //   if (
+  //     _.isNil(localStarUsers) === false &&
+  //     validateInputs(localStarUsers, remoteUsername, isStar)
+  //   ) {
+  //     // return afterChangePackage();
+  //   }
+  //   const users: Users = isStar
+  //     ? {
+  //         ...localStarUsers,
+  //         [remoteUsername]: true,
+  //       }
+  //     : _.reduce(
+  //         localStarUsers,
+  //         (users, value, key) => {
+  //           if (key !== remoteUsername) {
+  //             users[key] = value;
+  //           }
+  //           return users;
+  //         },
+  //         {}
+  //       );
+  //   debug('update package for  %o', name);
+  // }
+
+  // public async publish(body: any, options: IGetPackageOptionsNext): Promise<any> {
+  //   const { name } = options;
+  //   debug('publishing or updating a new version for %o', name);
+  //   // we check if the request is npm star
+  //   if (!isPublishablePackage(body) && isObject(body.users)) {
+  //     debug('starting star a package');
+  //     await this.starPackage(body as StarBody, options);
+  //   }
+
+  //   return { ok: API_MESSAGE.PKG_CHANGED, success: true };
+  // }
 
   public async getPackageByVersion(options: IGetPackageOptionsNext): Promise<Version> {
     const queryVersion = options.version as string;

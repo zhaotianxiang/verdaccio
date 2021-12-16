@@ -5,7 +5,7 @@ import _ from 'lodash';
 import path from 'path';
 
 import { VerdaccioError, errorUtils } from '@verdaccio/core';
-import { readFile, unlockFile } from '@verdaccio/file-locking';
+import { readFile, readFileNext, unlockFile, unlockFileNext } from '@verdaccio/file-locking';
 import { ReadTarball, UploadTarball } from '@verdaccio/streams';
 import { Callback, ILocalPackageManager, IUploadTarball, Logger, Package } from '@verdaccio/types';
 
@@ -81,6 +81,77 @@ export default class LocalFS implements ILocalFSPackageManager {
     * @param {*} onEnd
     */
   public updatePackage(
+    name: string,
+    updateHandler: Callback,
+    onWrite: Callback,
+    transformPackage: Function,
+    onEnd: Callback
+  ): void {
+    this._lockAndReadJSON(packageJSONFileName, (err, json) => {
+      let locked = false;
+      const self = this;
+      // callback that cleans up lock first
+      const unLockCallback = function (lockError: Error): void {
+        // eslint-disable-next-line prefer-rest-params
+        const _args = arguments;
+
+        if (locked) {
+          debug('unlock %s', packageJSONFileName);
+          self._unlockJSON(packageJSONFileName, () => {
+            // ignore any error from the unlock
+            if (lockError !== null) {
+              debug('lock file: %o has failed with error %o', name, lockError);
+            }
+
+            onEnd.apply(lockError, _args);
+          });
+        } else {
+          debug('file: %o has been updated', name);
+          onEnd(..._args);
+        }
+      };
+
+      if (!err) {
+        locked = true;
+        debug('file: %o has been locked', name);
+      }
+
+      if (_.isNil(err) === false) {
+        if (err.code === resourceNotAvailable) {
+          return unLockCallback(errorUtils.getInternalError('resource temporarily unavailable'));
+        } else if (err.code === noSuchFile) {
+          return unLockCallback(errorUtils.getNotFound());
+        } else {
+          return unLockCallback(err);
+        }
+      }
+
+      updateHandler(json, (err) => {
+        if (err) {
+          return unLockCallback(err);
+        }
+
+        onWrite(name, transformPackage(json), unLockCallback);
+      });
+    });
+  }
+
+  /**
+    *  This function allows to update the package thread-safely
+      Algorithm:
+      1. lock package.json for writing
+      2. read package.json
+      3. updateFn(pkg, cb), and wait for cb
+      4. write package.json.tmp
+      5. move package.json.tmp package.json
+      6. callback(err?)
+    * @param {*} name
+    * @param {*} updateHandler
+    * @param {*} onWrite
+    * @param {*} transformPackage
+    * @param {*} onEnd
+    */
+  public updatePackageNext(
     name: string,
     updateHandler: Callback,
     onWrite: Callback,
@@ -369,6 +440,23 @@ export default class LocalFS implements ILocalFSPackageManager {
         cb(err);
       }
     });
+  }
+
+  private async _lockAndReadJSONNext(name: string): Promise<Package> {
+    const fileName: string = this._getStorage(name);
+    debug('lock and read a file %o', fileName);
+    try {
+      const data = await readFileNext<Package>(fileName, {
+        lock: true,
+        parse: true,
+      });
+      return data;
+    } catch (err) {
+      this.logger.error({ err }, 'error on lock file @{err.message}');
+      debug('error on lock and read json for file: %o', name);
+
+      throw err;
+    }
   }
 
   private _lockAndReadJSON(name: string, cb: Function): void {

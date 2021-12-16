@@ -6,6 +6,7 @@ import { API_ERROR, DIST_TAGS, HTTP_STATUS, USERS } from '@verdaccio/core';
 import { Package, StringValue, Version } from '@verdaccio/types';
 import { generateRandomHexString, isNil, normalizeDistTags } from '@verdaccio/utils';
 
+import { Users } from '.';
 import { LocalStorage } from './local-storage';
 import { SearchInstance } from './search';
 
@@ -243,27 +244,6 @@ export function tagVersion(data: Package, version: string, tag: StringValue): bo
     // valid version - store
     data[DIST_TAGS][tag] = version;
     return true;
-  }
-  return false;
-}
-
-/**
- * Check whether the package metadta has enough data to be published
- * @param pkg metadata
- */
-
-export function isPublishablePackage(pkg: Package): boolean {
-  const keys: string[] = Object.keys(pkg);
-
-  return _.includes(keys, 'versions');
-}
-
-export function isRelatedToDeprecation(pkgInfo: Package): boolean {
-  const { versions } = pkgInfo;
-  for (const version in versions) {
-    if (Object.prototype.hasOwnProperty.call(versions[version], 'deprecated')) {
-      return true;
-    }
   }
   return false;
 }

@@ -12,13 +12,14 @@ import {
   HEADERS,
   HTTP_STATUS,
   errorUtils,
+  validatioUtils,
 } from '@verdaccio/core';
 import { notify } from '@verdaccio/hooks';
 import { logger } from '@verdaccio/logger';
 import { allow, expectJson, media } from '@verdaccio/middleware';
 import { Storage } from '@verdaccio/store';
 import { Callback, CallbackAction, Config, MergeTags, Package, Version } from '@verdaccio/types';
-import { hasDiffOneKey, isObject, validateMetadata } from '@verdaccio/utils';
+import { hasDiffOneKey, isObject } from '@verdaccio/utils';
 
 import { $NextFunctionVer, $RequestExtend, $ResponseExtend } from '../types/custom';
 import star from './star';
@@ -300,7 +301,7 @@ export function publishPackage(storage: Storage, config: Config, auth: IAuth): a
 
     try {
       debug('pre validation metadata to publish %o', req.body);
-      const metadata = validateMetadata(req.body, packageName);
+      const metadata = validatioUtils.validateMetadata(req.body, packageName);
       debug('post validation metadata to publish %o', metadata);
       // treating deprecation as updating a package
       if (req.params._rev || isRelatedToDeprecation(req.body)) {

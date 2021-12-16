@@ -408,7 +408,7 @@ class LocalStorage {
   public changePackage(
     name: string,
     incomingPkg: Package,
-    revision: string | void,
+    revision: string | undefined,
     callback: Callback
   ): void {
     debug(`change package tags for %o revision %s`, name, revision);
@@ -471,6 +471,7 @@ class LocalStorage {
       }
     );
   }
+
   /**
    * Remove a tarball.
    * @param {*} name
